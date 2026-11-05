@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -14,8 +13,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final DashboardService _dashboardService =
-      DashboardService.instance;
+  final DashboardService _dashboardService = DashboardService.instance;
 
   Map<String, dynamic> _summary = {};
   List<Map<String, dynamic>> _recentExpenses = [];
@@ -53,14 +51,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       setState(() {
         _summary = results[0] as Map<String, dynamic>;
-        _recentExpenses =
-            results[1] as List<Map<String, dynamic>>;
-        _todayAttendance =
-            results[2] as List<Map<String, dynamic>>;
-        _monthlyChart =
-            results[3] as List<Map<String, dynamic>>;
-        _categoryChart =
-            results[4] as List<Map<String, dynamic>>;
+        _recentExpenses = results[1] as List<Map<String, dynamic>>;
+        _todayAttendance = results[2] as List<Map<String, dynamic>>;
+        _monthlyChart = results[3] as List<Map<String, dynamic>>;
+        _categoryChart = results[4] as List<Map<String, dynamic>>;
         _isLoading = false;
       });
     } catch (e) {
@@ -135,6 +129,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // Responsive summary card
   Widget _summaryCard({
     required String title,
     required String value,
@@ -143,7 +138,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String subtitle,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(18),
@@ -157,6 +152,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -178,29 +174,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 10),
           Text(
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: AppTheme.textPrimary,
-              fontSize: 21,
+              fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 3),
           Text(
             title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: AppTheme.textSecondary,
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: color,
               fontSize: 11,
@@ -288,6 +288,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // Responsive quick action card
   Widget _quickAction({
     required String title,
     required IconData icon,
@@ -299,8 +300,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       borderRadius: BorderRadius.circular(16),
       child: Container(
         padding: const EdgeInsets.symmetric(
-          vertical: 17,
-          horizontal: 8,
+          vertical: 12,
+          horizontal: 4,
         ),
         decoration: BoxDecoration(
           color: AppTheme.surface,
@@ -308,16 +309,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
           border: Border.all(color: AppTheme.border),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 9),
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 7),
             Text(
               title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontWeight: FontWeight.w600,
-                fontSize: 11,
+                fontSize: 10,
+                height: 1.15,
               ),
             ),
           ],
@@ -791,7 +797,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         physics: const NeverScrollableScrollPhysics(),
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
-                        childAspectRatio: 1.30,
+                        childAspectRatio: 0.82,
                         children: [
                           _summaryCard(
                             title: 'Employees',
@@ -842,7 +848,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         physics: const NeverScrollableScrollPhysics(),
                         crossAxisSpacing: 9,
                         mainAxisSpacing: 9,
-                        childAspectRatio: 0.85,
+                        childAspectRatio: 0.68,
                         children: [
                           _quickAction(
                             title: 'Expenses',
@@ -916,9 +922,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       if (_recentExpenses.isEmpty)
                         _emptyMessage('No expenses added yet.')
                       else
-                        ..._recentExpenses
-                            .take(5)
-                            .map(_recentExpenseCard),
+                        ..._recentExpenses.take(5).map(_recentExpenseCard),
 
                       const SizedBox(height: 18),
 

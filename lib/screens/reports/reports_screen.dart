@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/report_service.dart';
 import '../../services/export_service.dart';
+import '../../services/barcode_service.dart';
 
 enum ReportType {
   expenses,
@@ -24,6 +25,7 @@ class ReportsScreen extends StatefulWidget {
 class _ReportsScreenState extends State<ReportsScreen> {
   final ReportService _reportService = ReportService.instance;
   final ExportService _exportService = ExportService.instance;
+  final BarcodeService _barcodeService = BarcodeService.instance;
 
   ReportType _selectedReport = ReportType.expenses;
   DateTime _selectedMonth = DateTime.now();
@@ -418,13 +420,209 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  String _dateTimeText(dynamic value) {
+    if (value == null) return '-';
+
+    try {
+      final date = DateTime.parse(value.toString()).toLocal();
+      return DateFormat('dd MMM yyyy, hh:mm a').format(date);
+    } catch (_) {
+      return value.toString();
+    }
+  }
+
   Widget _buildBarcodeCard(Map<String, dynamic> record) {
-    return _recordCard(
-      icon: Icons.qr_code_2,
-      title: record['barcode_number']?.toString() ?? '-',
-      subtitle: 'Scanned: ${_dateText(record['scanned_at'])}',
-      trailing: 'Saved',
+    final id = int.tryParse(record['id']?.toString() ?? '');
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15),
+        side: BorderSide(color: AppTheme.border),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 7,
+        ),
+        leading: CircleAvatar(
+          backgroundColor: AppTheme.primary.withOpacity(0.10),
+          child: const Icon(
+            Icons.qr_code_2,
+            color: AppTheme.primary,
+          ),
+        ),
+        title: Text(
+          record['barcode_number']?.toString() ?? '-',
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 5),
+          child: Text(
+            'Scanned: ${_dateTimeText(record['scanned_at'])}',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+        ),
+        trailing: id == null
+            ? const SizedBox.shrink()
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    onPressed: () => _editBarcodeRecord(record),
+                    icon: const Icon(
+                      Icons.edit_outlined,
+                      color: AppTheme.primary,
+                    ),
+                    tooltip: 'Edit',
+                  ),
+                  IconButton(
+                    onPressed: () => _deleteBarcodeRecord(record),
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: AppTheme.danger,
+                    ),
+                    tooltip: 'Delete',
+                  ),
+                ],
+              ),
+      ),
     );
+  }
+
+  Future<void> _editBarcodeRecord(
+    Map<String, dynamic> record,
+  ) async {
+    final id = int.tryParse(record['id']?.toString() ?? '');
+    if (id == null) return;
+
+    final controller = TextEditingController(
+      text: record['barcode_number']?.toString() ?? '',
+    );
+    final formKey = GlobalKey<FormState>();
+
+    final updatedNumber = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Edit Barcode'),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Barcode Number',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Barcode number required';
+                }
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(
+                    dialogContext,
+                    controller.text.trim(),
+                  );
+                }
+              },
+              child: const Text('Update'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (updatedNumber == null || !mounted) return;
+
+    try {
+      await _barcodeService.updateBarcode(id, updatedNumber);
+
+      if (!mounted) return;
+
+      _showMessage(
+        'Barcode update ho gaya.',
+        color: AppTheme.success,
+      );
+      await _loadReport();
+    } on StateError catch (e) {
+      if (!mounted) return;
+      _showMessage(e.message, color: AppTheme.danger);
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Update failed: $e', color: AppTheme.danger);
+    }
+  }
+
+  Future<void> _deleteBarcodeRecord(
+    Map<String, dynamic> record,
+  ) async {
+    final id = int.tryParse(record['id']?.toString() ?? '');
+    if (id == null) return;
+
+    final number = record['barcode_number']?.toString() ?? '';
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Barcode?'),
+          content: Text(
+            'Kya aap barcode "$number" delete karna chahte hain?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.danger,
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await _barcodeService.deleteBarcode(id);
+
+      if (!mounted) return;
+
+      _showMessage(
+        'Barcode delete ho gaya.',
+        color: AppTheme.success,
+      );
+      await _loadReport();
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Delete failed: $e', color: AppTheme.danger);
+    }
   }
 
   Widget _recordCard({
@@ -576,7 +774,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         return _records.map((record) {
           return [
             record['barcode_number']?.toString() ?? '',
-            record['scanned_at']?.toString() ?? '',
+            _dateTimeText(record['scanned_at']),
           ];
         }).toList();
     }

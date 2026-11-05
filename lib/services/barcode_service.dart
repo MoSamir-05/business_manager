@@ -1,3 +1,4 @@
+
 import '../database/database_helper.dart';
 import '../models/barcode_model.dart';
 
@@ -18,7 +19,6 @@ class BarcodeService {
 
     final db = await _databaseHelper.database;
 
-    // Check duplicate barcode
     final existing = await db.query(
       'barcodes',
       columns: ['id'],
@@ -36,9 +36,37 @@ class BarcodeService {
       scannedAt: DateTime.now().toIso8601String(),
     );
 
-    return await db.insert(
+    return await db.insert('barcodes', barcode.toMap());
+  }
+
+  // Update existing barcode
+  Future<int> updateBarcode(int id, String barcodeNumber) async {
+    final number = barcodeNumber.trim();
+
+    if (number.isEmpty) {
+      throw ArgumentError('Barcode number cannot be empty.');
+    }
+
+    final db = await _databaseHelper.database;
+
+    // Check duplicate, excluding current barcode
+    final existing = await db.query(
       'barcodes',
-      barcode.toMap(),
+      columns: ['id'],
+      where: 'barcode_number = ? AND id != ?',
+      whereArgs: [number, id],
+      limit: 1,
+    );
+
+    if (existing.isNotEmpty) {
+      throw StateError('This barcode is already saved.');
+    }
+
+    return await db.update(
+      'barcodes',
+      {'barcode_number': number},
+      where: 'id = ?',
+      whereArgs: [id],
     );
   }
 
@@ -51,15 +79,11 @@ class BarcodeService {
       orderBy: 'scanned_at DESC, id DESC',
     );
 
-    return result
-        .map((map) => BarcodeModel.fromMap(map))
-        .toList();
+    return result.map((map) => BarcodeModel.fromMap(map)).toList();
   }
 
   // Search barcode by number
-  Future<List<BarcodeModel>> searchBarcodes(
-    String query,
-  ) async {
+  Future<List<BarcodeModel>> searchBarcodes(String query) async {
     final db = await _databaseHelper.database;
 
     final searchQuery = '%${query.trim()}%';
@@ -71,9 +95,7 @@ class BarcodeService {
       orderBy: 'scanned_at DESC',
     );
 
-    return result
-        .map((map) => BarcodeModel.fromMap(map))
-        .toList();
+    return result.map((map) => BarcodeModel.fromMap(map)).toList();
   }
 
   // Check whether barcode already exists
@@ -102,9 +124,7 @@ class BarcodeService {
       limit: 1,
     );
 
-    if (result.isEmpty) {
-      return null;
-    }
+    if (result.isEmpty) return null;
 
     return BarcodeModel.fromMap(result.first);
   }

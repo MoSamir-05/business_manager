@@ -7,6 +7,19 @@ class DashboardService {
 
   final DatabaseHelper _databaseHelper = DatabaseHelper.instance;
 
+  // Convert dd-MM-yyyy into yyyy-MM-dd for SQL date comparison.
+  String get _normalizedExpenseDateSql => '''
+    CASE
+      WHEN length(expense_date) = 10
+        AND substr(expense_date, 3, 1) = '-'
+      THEN
+        substr(expense_date, 7, 4) || '-' ||
+        substr(expense_date, 4, 2) || '-' ||
+        substr(expense_date, 1, 2)
+      ELSE substr(expense_date, 1, 10)
+    END
+  ''';
+
   // Get complete dashboard summary
   Future<Map<String, dynamic>> getDashboardSummary() async {
     final db = await _databaseHelper.database;
@@ -14,9 +27,12 @@ class DashboardService {
     final now = DateTime.now();
 
     final today = _formatDate(now);
+    final displayToday = _formatDisplayDate(now);
+
     final monthStart = _formatDate(
       DateTime(now.year, now.month, 1),
     );
+
     final nextMonthStart = _formatDate(
       DateTime(now.year, now.month + 1, 1),
     );
@@ -45,9 +61,9 @@ class DashboardService {
         SUM(CASE WHEN status = 'Paid Leave' THEN 1 ELSE 0 END)
           AS paid_leave
       FROM attendance
-      WHERE attendance_date = ?
+      WHERE attendance_date IN (?, ?)
       ''',
-      [today],
+      [today, displayToday],
     );
 
     final attendance = attendanceResult.first;
@@ -64,19 +80,16 @@ class DashboardService {
     final paidLeaveToday =
         (attendance['paid_leave'] as num?)?.toInt() ?? 0;
 
-    // Current month expenses
+    // Current month expenses - supports both date formats
     final expenseResult = await db.rawQuery(
       '''
       SELECT COALESCE(SUM(amount), 0) AS total
       FROM expenses
-      WHERE expense_date >= ?
-      AND expense_date < ?
+      WHERE $_normalizedExpenseDateSql >= ?
+      AND $_normalizedExpenseDateSql < ?
       AND deleted_at IS NULL
       ''',
-      [
-        monthStart,
-        nextMonthStart,
-      ],
+      [monthStart, nextMonthStart],
     );
 
     final monthlyExpenses =
@@ -130,23 +143,24 @@ class DashboardService {
   }) async {
     final db = await _databaseHelper.database;
 
-    final result = await db.query(
+    return await db.query(
       'expenses',
       where: 'deleted_at IS NULL',
       orderBy: 'created_at DESC',
       limit: limit,
     );
-
-    return result;
   }
 
   // Get today's attendance records
   Future<List<Map<String, dynamic>>> getTodayAttendance() async {
     final db = await _databaseHelper.database;
 
-    final today = _formatDate(DateTime.now());
+    final now = DateTime.now();
 
-    final result = await db.rawQuery(
+    final today = _formatDate(now);
+    final displayToday = _formatDisplayDate(now);
+
+    return await db.rawQuery(
       '''
       SELECT
         attendance.id,
@@ -157,13 +171,11 @@ class DashboardService {
       FROM attendance
       INNER JOIN employees
       ON attendance.employee_id = employees.id
-      WHERE attendance.attendance_date = ?
+      WHERE attendance.attendance_date IN (?, ?)
       ORDER BY employees.name ASC
       ''',
-      [today],
+      [today, displayToday],
     );
-
-    return result;
   }
 
   // Get monthly expense chart data
@@ -172,34 +184,29 @@ class DashboardService {
   }) async {
     final db = await _databaseHelper.database;
 
-    final result = await db.rawQuery(
+    return await db.rawQuery(
       '''
       SELECT
         CAST(
-          strftime('%m', expense_date) AS INTEGER
+          substr($_normalizedExpenseDateSql, 6, 2)
+          AS INTEGER
         ) AS month,
         COALESCE(SUM(amount), 0) AS total
       FROM expenses
-      WHERE expense_date >= ?
-      AND expense_date < ?
+      WHERE substr($_normalizedExpenseDateSql, 1, 4) = ?
       AND deleted_at IS NULL
-      GROUP BY strftime('%m', expense_date)
+      GROUP BY month
       ORDER BY month ASC
       ''',
-      [
-        '$year-01-01',
-        '${year + 1}-01-01',
-      ],
+      [year.toString()],
     );
-
-    return result;
   }
 
   // Get category-wise expense chart data
   Future<List<Map<String, dynamic>>> getExpenseCategoryChart() async {
     final db = await _databaseHelper.database;
 
-    final result = await db.rawQuery('''
+    return await db.rawQuery('''
       SELECT
         category,
         COALESCE(SUM(amount), 0) AS total
@@ -208,8 +215,6 @@ class DashboardService {
       GROUP BY category
       ORDER BY total DESC
     ''');
-
-    return result;
   }
 
   // Format date as yyyy-MM-dd
@@ -219,5 +224,13 @@ class DashboardService {
     final day = date.day.toString().padLeft(2, '0');
 
     return '$year-$month-$day';
+  }
+
+  // Format date as dd-MM-yyyy
+  String _formatDisplayDate(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+
+    return '$day-$month-${date.year}';
   }
 }

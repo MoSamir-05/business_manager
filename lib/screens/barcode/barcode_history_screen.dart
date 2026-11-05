@@ -70,6 +70,88 @@ class _BarcodeHistoryScreenState extends State<BarcodeHistoryScreen> {
     }
   }
 
+  // Edit barcode
+  Future<void> _editBarcode(BarcodeModel barcode) async {
+    if (barcode.id == null) return;
+
+    final controller = TextEditingController(
+      text: barcode.barcodeNumber,
+    );
+
+    final formKey = GlobalKey<FormState>();
+
+    final updatedNumber = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Edit Barcode'),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Barcode Number',
+                prefixIcon: Icon(Icons.qr_code_2),
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Barcode number required';
+                }
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(
+                    dialogContext,
+                    controller.text.trim(),
+                  );
+                }
+              },
+              child: const Text('Update'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (updatedNumber == null || !mounted) return;
+
+    try {
+      await _barcodeService.updateBarcode(
+        barcode.id!,
+        updatedNumber,
+      );
+
+      if (!mounted) return;
+
+      await _searchBarcodes(_searchController.text);
+
+      _showMessage(
+        'Barcode update ho gaya.',
+        color: AppTheme.success,
+      );
+    } on StateError catch (e) {
+      if (!mounted) return;
+      _showMessage(e.message);
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Barcode update nahi hua: $e');
+    }
+  }
+
+  // Delete barcode
   Future<void> _deleteBarcode(BarcodeModel barcode) async {
     if (barcode.id == null) return;
 
@@ -105,9 +187,7 @@ class _BarcodeHistoryScreenState extends State<BarcodeHistoryScreen> {
 
       if (!mounted) return;
 
-      setState(() {
-        _barcodes.removeWhere((item) => item.id == barcode.id);
-      });
+      await _searchBarcodes(_searchController.text);
 
       _showMessage(
         'Barcode delete ho gaya.',
@@ -131,9 +211,10 @@ class _BarcodeHistoryScreenState extends State<BarcodeHistoryScreen> {
       );
   }
 
+  // Show date and exact scan time
   String _formatDate(String value) {
     try {
-      final date = DateTime.parse(value);
+      final date = DateTime.parse(value).toLocal();
       return DateFormat('dd MMM yyyy, hh:mm a').format(date);
     } catch (_) {
       return value;
@@ -261,6 +342,14 @@ class _BarcodeHistoryScreenState extends State<BarcodeHistoryScreen> {
                   ),
                 ],
               ),
+            ),
+            IconButton(
+              onPressed: () => _editBarcode(barcode),
+              icon: const Icon(
+                Icons.edit_outlined,
+                color: AppTheme.primary,
+              ),
+              tooltip: 'Edit barcode',
             ),
             IconButton(
               onPressed: () => _deleteBarcode(barcode),
