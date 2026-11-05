@@ -16,15 +16,16 @@ class BackupService {
 
   final DatabaseHelper _databaseHelper = DatabaseHelper.instance;
 
-  // Select a folder and create a backup.
+  static const String _appName = 'Business Manager';
+  static const int _backupVersion = 1;
+
+  // Select folder and create manual backup.
   Future<String?> createBackup() async {
     final selectedDirectory = await FilePicker.getDirectoryPath(
       dialogTitle: 'Select Backup Folder',
     );
 
-    if (selectedDirectory == null) {
-      return null;
-    }
+    if (selectedDirectory == null) return null;
 
     final directory = Directory(selectedDirectory);
 
@@ -32,13 +33,20 @@ class BackupService {
       throw Exception('Selected backup folder does not exist.');
     }
 
-    return _createBackupInDirectory(directory);
+    return _createBackupInDirectory(
+      directory,
+      backupType: 'Manual',
+    );
   }
 
-  // Create backup inside selected directory.
+  // Create backup archive.
   Future<String> _createBackupInDirectory(
-    Directory directory,
-  ) async {
+    Directory directory, {
+    required String backupType,
+  }) async {
+    final archive = Archive();
+    final mediaManifest = <Map<String, String>>[];
+
     final db = await _databaseHelper.database;
 
     final employeePhotos = await db.query(
@@ -51,22 +59,15 @@ class BackupService {
       columns: ['id', 'receipt_path'],
     );
 
-    final archive = Archive();
-    final mediaManifest = <Map<String, String>>[];
-
-    // Include employee photos.
+    // Add employee photos.
     for (final employee in employeePhotos) {
       final photoPath = employee['photo_path'] as String?;
 
-      if (photoPath == null || photoPath.isEmpty) {
-        continue;
-      }
+      if (photoPath == null || photoPath.isEmpty) continue;
 
       final file = File(photoPath);
 
-      if (!await file.exists()) {
-        continue;
-      }
+      if (!await file.exists()) continue;
 
       final archiveName =
           'media/employee_${employee['id']}${p.extension(photoPath)}';
@@ -84,19 +85,15 @@ class BackupService {
       });
     }
 
-    // Include expense receipt images.
+    // Add expense receipt images.
     for (final expense in expenseReceipts) {
       final receiptPath = expense['receipt_path'] as String?;
 
-      if (receiptPath == null || receiptPath.isEmpty) {
-        continue;
-      }
+      if (receiptPath == null || receiptPath.isEmpty) continue;
 
       final file = File(receiptPath);
 
-      if (!await file.exists()) {
-        continue;
-      }
+      if (!await file.exists()) continue;
 
       final archiveName =
           'media/expense_${expense['id']}${p.extension(receiptPath)}';
@@ -116,10 +113,9 @@ class BackupService {
 
     final databasePath = await _databaseHelper.getDatabasePath();
 
-    // Close database so pending SQLite changes are written.
     await _databaseHelper.closeDatabase();
 
-    late final String backupPath;
+    String? backupPath;
 
     try {
       final databaseFile = File(databasePath);
@@ -139,8 +135,8 @@ class BackupService {
       );
 
       final manifest = {
-        'app_name': 'Business Manager',
-        'backup_version': 1,
+        'app_name': _appName,
+        'backup_version': _backupVersion,
         'created_at': DateTime.now().toIso8601String(),
         'media': mediaManifest,
       };
@@ -158,7 +154,7 @@ class BackupService {
       final zipBytes = ZipEncoder().encode(archive);
 
       if (zipBytes == null) {
-        throw Exception('Could not create backup archive.');
+        throw Exception('Unable to create backup archive.');
       }
 
       final timestamp = DateTime.now()
@@ -179,30 +175,46 @@ class BackupService {
 
       backupPath = backupFile.path;
     } finally {
-      // Reopen database even if backup creation fails.
       await _databaseHelper.database;
     }
 
+    if (backupPath == null) {
+      throw Exception('Backup creation failed.');
+    }
+
     // Save backup history.
-    final reopenedDb = await _databaseHelper.database;
-
-    final backupFile = File(backupPath);
-
-    await reopenedDb.insert(
-      'backup_history',
-      {
-        'file_path': backupPath,
-        'file_size': await backupFile.length(),
-        'backup_type': 'Manual',
-        'backup_status': 'Success',
-        'created_at': DateTime.now().toIso8601String(),
-      },
+    await _saveBackupHistory(
+      backupPath,
+      backupType: backupType,
+      status: 'Success',
     );
 
     return backupPath;
   }
 
-  // Select an existing backup file (File Picker v13 API).
+  Future<void> _saveBackupHistory(
+    String filePath, {
+    required String backupType,
+    required String status,
+  }) async {
+    final db = await _databaseHelper.database;
+    final file = File(filePath);
+
+    final fileSize = await file.exists() ? await file.length() : 0;
+
+    await db.insert(
+      'backup_history',
+      {
+        'file_path': filePath,
+        'file_size': fileSize,
+        'backup_type': backupType,
+        'backup_status': status,
+        'created_at': DateTime.now().toIso8601String(),
+      },
+    );
+  }
+
+  // Select backup file.
   Future<String?> selectBackupFile() async {
     final selectedFile = await FilePicker.pickFile(
       dialogTitle: 'Select Business Manager Backup',
@@ -217,7 +229,7 @@ class BackupService {
     return selectedFile.path;
   }
 
-  // Convert archive entry content into bytes.
+  // Read archive bytes safely.
   List<int> _getArchiveBytes(ArchiveFile file) {
     final content = file.content;
 
@@ -230,7 +242,7 @@ class BackupService {
     );
   }
 
-  // Find an archive file by its exact path.
+  // Find exact archive entry.
   ArchiveFile? _findArchiveFile(
     Archive archive,
     String archivePath,
@@ -244,38 +256,29 @@ class BackupService {
     return null;
   }
 
-  // Restore backup after user confirmation.
-  Future<void> restoreBackup(String backupPath) async {
+  // Validate backup without restoring it.
+  Future<Map<String, dynamic>> validateBackup(
+    String backupPath,
+  ) async {
     final backupFile = File(backupPath);
 
     if (!await backupFile.exists()) {
       throw Exception('Backup file does not exist.');
     }
 
-    final backupBytes = await backupFile.readAsBytes();
+    final archive = _decodeArchive(
+      await backupFile.readAsBytes(),
+    );
 
-    final Archive archive;
+    final databaseEntry = _findArchiveFile(
+      archive,
+      'database/business_manager.db',
+    );
 
-    try {
-      archive = ZipDecoder().decodeBytes(backupBytes);
-    } catch (_) {
-      throw const FormatException(
-        'Backup file is damaged or invalid.',
-      );
-    }
-
-    ArchiveFile? databaseEntry;
-    ArchiveFile? manifestEntry;
-
-    for (final entry in archive.files) {
-      if (entry.name == 'database/business_manager.db') {
-        databaseEntry = entry;
-      }
-
-      if (entry.name == 'backup_manifest.json') {
-        manifestEntry = entry;
-      }
-    }
+    final manifestEntry = _findArchiveFile(
+      archive,
+      'backup_manifest.json',
+    );
 
     if (databaseEntry == null || manifestEntry == null) {
       throw const FormatException(
@@ -283,28 +286,9 @@ class BackupService {
       );
     }
 
-    // Validate backup manifest.
-    final manifestText = utf8.decode(
+    final manifest = _decodeManifest(
       _getArchiveBytes(manifestEntry),
     );
-
-    final dynamic manifest;
-
-    try {
-      manifest = jsonDecode(manifestText);
-    } catch (_) {
-      throw const FormatException(
-        'Backup manifest is invalid.',
-      );
-    }
-
-    if (manifest is! Map ||
-        manifest['app_name'] != 'Business Manager' ||
-        manifest['backup_version'] != 1) {
-      throw const FormatException(
-        'Unsupported backup format.',
-      );
-    }
 
     final mediaList = manifest['media'];
 
@@ -314,17 +298,129 @@ class BackupService {
       );
     }
 
+    // Check that every listed media file exists.
+    int mediaCount = 0;
+
+    for (final item in mediaList) {
+      if (item is! Map) {
+        throw const FormatException(
+          'Invalid media entry in backup.',
+        );
+      }
+
+      final type = item['type'];
+      final id = item['id'];
+      final archivePath = item['archive_path'];
+
+      if ((type != 'employee' && type != 'expense') ||
+          id is! String ||
+          int.tryParse(id) == null ||
+          archivePath is! String ||
+          !archivePath.startsWith('media/') ||
+          archivePath.contains('..')) {
+        throw const FormatException(
+          'Invalid media information in backup.',
+        );
+      }
+
+      final mediaEntry = _findArchiveFile(
+        archive,
+        archivePath,
+      );
+
+      if (mediaEntry == null) {
+        throw const FormatException(
+          'A media file is missing from the backup.',
+        );
+      }
+
+      mediaCount++;
+    }
+
+    return {
+      'created_at': manifest['created_at'],
+      'backup_version': manifest['backup_version'],
+      'database_size': _getArchiveBytes(databaseEntry).length,
+      'media_count': mediaCount,
+      'file_size': await backupFile.length(),
+    };
+  }
+
+  Archive _decodeArchive(List<int> bytes) {
+    try {
+      return ZipDecoder().decodeBytes(bytes);
+    } catch (_) {
+      throw const FormatException(
+        'Backup file is damaged or invalid.',
+      );
+    }
+  }
+
+  Map<String, dynamic> _decodeManifest(List<int> bytes) {
+    try {
+      final decoded = jsonDecode(utf8.decode(bytes));
+
+      if (decoded is! Map<String, dynamic> ||
+          decoded['app_name'] != _appName ||
+          decoded['backup_version'] != _backupVersion) {
+        throw const FormatException(
+          'Unsupported backup format.',
+        );
+      }
+
+      return decoded;
+    } catch (_) {
+      throw const FormatException(
+        'Backup manifest is invalid or unsupported.',
+      );
+    }
+  }
+
+  // Restore backup.
+  Future<void> restoreBackup(String backupPath) async {
+    final backupFile = File(backupPath);
+
+    final preview = await validateBackup(backupPath);
+
+    final backupBytes = await backupFile.readAsBytes();
+    final archive = _decodeArchive(backupBytes);
+
+    final databaseEntry = _findArchiveFile(
+      archive,
+      'database/business_manager.db',
+    )!;
+
+    final manifestEntry = _findArchiveFile(
+      archive,
+      'backup_manifest.json',
+    )!;
+
+    final manifest = _decodeManifest(
+      _getArchiveBytes(manifestEntry),
+    );
+
+    final mediaList = manifest['media'] as List;
+
     final restoredDatabaseBytes =
         _getArchiveBytes(databaseEntry);
 
-    // Prepare safety backup before replacing the database.
-    final temporaryDirectory = await getTemporaryDirectory();
+    // Save current database safety copy.
+    final documentsDirectory =
+        await getApplicationDocumentsDirectory();
+
+    final safetyDirectory = Directory(
+      p.join(
+        documentsDirectory.path,
+        'BusinessManagerSafetyBackups',
+      ),
+    );
+
+    await safetyDirectory.create(recursive: true);
 
     final safetyFile = File(
       p.join(
-        temporaryDirectory.path,
-        'BusinessManager_PreRestore_'
-        '${DateTime.now().millisecondsSinceEpoch}.db',
+        safetyDirectory.path,
+        'PreRestore_${DateTime.now().millisecondsSinceEpoch}.db',
       ),
     );
 
@@ -333,26 +429,21 @@ class BackupService {
 
     final currentDatabaseFile = File(currentDatabasePath);
 
+    // Close SQLite before replacing the database.
     await _databaseHelper.closeDatabase();
 
+    final restoredMediaPaths = <Map<String, dynamic>>[];
+
     try {
-      if (!await currentDatabaseFile.exists()) {
-        throw Exception('Current database file not found.');
+      if (await currentDatabaseFile.exists()) {
+        await currentDatabaseFile.copy(safetyFile.path);
       }
 
-      // Copy existing database before restore.
-      await currentDatabaseFile.copy(safetyFile.path);
-
-      // Replace database with backup database.
+      // Replace database.
       await currentDatabaseFile.writeAsBytes(
         restoredDatabaseBytes,
         flush: true,
       );
-
-      final documentsDirectory =
-          await getApplicationDocumentsDirectory();
-
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
 
       final employeeDirectory = Directory(
         p.join(
@@ -373,25 +464,13 @@ class BackupService {
       await employeeDirectory.create(recursive: true);
       await receiptDirectory.create(recursive: true);
 
-      final restoredMedia = <Map<String, dynamic>>[];
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
 
-      // Restore media using unique filenames.
-      // This avoids overwriting existing photos and receipts.
+      // Restore photos and receipts.
       for (final item in mediaList) {
-        if (item is! Map) {
-          continue;
-        }
-
-        final type = item['type'];
-        final id = item['id'];
-        final archivePath = item['archive_path'];
-
-        if ((type != 'employee' && type != 'expense') ||
-            id is! String ||
-            archivePath is! String ||
-            !archivePath.startsWith('media/')) {
-          continue;
-        }
+        final type = item['type'] as String;
+        final id = int.parse(item['id'] as String);
+        final archivePath = item['archive_path'] as String;
 
         final mediaEntry = _findArchiveFile(
           archive,
@@ -399,10 +478,10 @@ class BackupService {
         );
 
         if (mediaEntry == null) {
-          continue;
+          throw const FormatException(
+            'Backup media file is missing.',
+          );
         }
-
-        final extension = p.extension(archivePath);
 
         final destinationDirectory = type == 'employee'
             ? employeeDirectory
@@ -415,7 +494,7 @@ class BackupService {
         final destination = File(
           p.join(
             destinationDirectory.path,
-            '${prefix}_${id}_restore_$timestamp$extension',
+            '${prefix}_${id}_restore_$timestamp${p.extension(archivePath)}',
           ),
         );
 
@@ -424,18 +503,18 @@ class BackupService {
           flush: true,
         );
 
-        restoredMedia.add({
+        restoredMediaPaths.add({
           'type': type,
-          'id': int.parse(id),
+          'id': id,
           'path': destination.path,
         });
       }
 
-      // Open restored database and update media paths.
       final restoredDb = await _databaseHelper.database;
 
+      // Update database paths for restored media.
       await restoredDb.transaction((txn) async {
-        for (final media in restoredMedia) {
+        for (final media in restoredMediaPaths) {
           final table = media['type'] == 'employee'
               ? 'employees'
               : 'expenses';
@@ -456,7 +535,7 @@ class BackupService {
           'backup_history',
           {
             'file_path': backupFile.path,
-            'file_size': await backupFile.length(),
+            'file_size': preview['file_size'],
             'backup_type': 'Restore',
             'backup_status': 'Success',
             'created_at': DateTime.now().toIso8601String(),
@@ -464,7 +543,7 @@ class BackupService {
         );
       });
     } catch (error) {
-      // Restore original database if anything fails.
+      // Restore previous database if restore fails.
       await _databaseHelper.closeDatabase();
 
       if (await safetyFile.exists()) {
@@ -473,12 +552,11 @@ class BackupService {
 
       rethrow;
     } finally {
-      // Ensure database is open after success or failure.
       await _databaseHelper.database;
     }
   }
 
-  // Get backup history.
+  // Backup history.
   Future<List<Map<String, dynamic>>> getBackupHistory() async {
     final db = await _databaseHelper.database;
 
@@ -488,7 +566,7 @@ class BackupService {
     );
   }
 
-  // Get backup file size in readable format.
+  // File size formatting.
   String formatFileSize(int bytes) {
     if (bytes < 1024) {
       return '$bytes B';
@@ -498,6 +576,10 @@ class BackupService {
       return '${(bytes / 1024).toStringAsFixed(2)} KB';
     }
 
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+    }
+
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 }

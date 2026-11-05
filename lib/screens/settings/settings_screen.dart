@@ -1,7 +1,7 @@
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../app.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/settings_service.dart';
 import '../../services/app_security_service.dart';
@@ -90,7 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _isSaving = true);
 
     try {
-      await _settingsService.saveTheme(value);
+      await AppThemeController.updateTheme(value);
 
       if (!mounted) return;
 

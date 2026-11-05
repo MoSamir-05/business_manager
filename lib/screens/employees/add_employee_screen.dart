@@ -1,9 +1,13 @@
+
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/employee_model.dart';
 import '../../services/employee_service.dart';
+import '../../services/employee_photo_service.dart';
 
 class AddEmployeeScreen extends StatefulWidget {
   const AddEmployeeScreen({
@@ -26,12 +30,16 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
   final _salaryController = TextEditingController();
 
   final EmployeeService _employeeService = EmployeeService.instance;
+  final EmployeePhotoService _photoService =
+      EmployeePhotoService.instance;
 
   DateTime _joiningDate = DateTime.now();
   String _status = 'Active';
   String? _photoPath;
+  String? _previousPhotoPath;
 
   bool _isSaving = false;
+  bool _isPickingPhoto = false;
 
   bool get _isEditing => widget.employee != null;
 
@@ -53,6 +61,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
 
       _status = employee.status;
       _photoPath = employee.photoPath;
+      _previousPhotoPath = employee.photoPath;
     }
   }
 
@@ -77,6 +86,83 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     final month = date.month.toString().padLeft(2, '0');
 
     return '$day-$month-${date.year}';
+  }
+
+  Future<void> _showPhotoOptions() async {
+    if (_isPickingPhoto || _isSaving) return;
+
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.camera_alt_outlined),
+                  title: const Text('Take Photo'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickPhoto(fromCamera: true);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library_outlined),
+                  title: const Text('Choose from Gallery'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickPhoto(fromCamera: false);
+                  },
+                ),
+                if (_photoPath != null)
+                  ListTile(
+                    leading: const Icon(
+                      Icons.delete_outline,
+                      color: Colors.red,
+                    ),
+                    title: const Text('Remove Photo'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      setState(() {
+                        _photoPath = null;
+                      });
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickPhoto({required bool fromCamera}) async {
+    setState(() => _isPickingPhoto = true);
+
+    try {
+      final path = fromCamera
+          ? await _photoService.takePhoto()
+          : await _photoService.selectFromGallery();
+
+      if (!mounted) return;
+
+      if (path != null) {
+        setState(() {
+          _photoPath = path;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      _showMessage('Unable to select photo. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isPickingPhoto = false);
+      }
+    }
   }
 
   Future<void> _pickJoiningDate() async {
@@ -124,6 +210,11 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         await _employeeService.addEmployee(employee);
       }
 
+      if (_previousPhotoPath != null &&
+          _previousPhotoPath != _photoPath) {
+        await _photoService.deletePhoto(_previousPhotoPath);
+      }
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -152,6 +243,12 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         });
       }
     }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
@@ -184,6 +281,60 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
             padding: const EdgeInsets.all(18),
             children: [
               _buildSectionTitle('Personal Information'),
+              const SizedBox(height: 18),
+
+              Center(
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: _showPhotoOptions,
+                      child: Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 55,
+                            backgroundColor: AppTheme.primary
+                                .withValues(alpha: 0.12),
+                            backgroundImage: _photoPath != null
+                                ? FileImage(File(_photoPath!))
+                                : null,
+                            child: _photoPath == null
+                                ? const Icon(
+                                    Icons.person_outline,
+                                    size: 55,
+                                    color: AppTheme.primary,
+                                  )
+                                : null,
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: CircleAvatar(
+                              radius: 18,
+                              backgroundColor: AppTheme.primary,
+                              child: const Icon(
+                                Icons.camera_alt,
+                                size: 19,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed:
+                          _isPickingPhoto ? null : _showPhotoOptions,
+                      child: Text(
+                        _isPickingPhoto
+                            ? 'Selecting Photo...'
+                            : 'Add Employee Photo (Optional)',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
               const SizedBox(height: 18),
 
               _buildTextField(
@@ -275,7 +426,9 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
               SizedBox(
                 height: 54,
                 child: FilledButton.icon(
-                  onPressed: _isSaving ? null : _saveEmployee,
+                  onPressed: _isSaving || _isPickingPhoto
+                      ? null
+                      : _saveEmployee,
                   icon: _isSaving
                       ? const SizedBox(
                           height: 20,

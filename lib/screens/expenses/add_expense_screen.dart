@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -68,9 +69,60 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       _selectedCategory = expense.category;
       _selectedPaymentMethod = expense.paymentMethod;
 
-      _selectedDate =
-          DateTime.tryParse(expense.expenseDate) ?? DateTime.now();
+      _selectedDate = _parseExpenseDate(expense.expenseDate);
     }
+  }
+
+  DateTime _parseExpenseDate(String value) {
+    // First try ISO format: yyyy-MM-dd
+    final isoDate = DateTime.tryParse(value);
+
+    if (isoDate != null) {
+      return isoDate;
+    }
+
+    // Handle dd-MM-yyyy format
+    final parts = value.split('-');
+
+    if (parts.length == 3) {
+      final day = int.tryParse(parts[0]);
+      final month = int.tryParse(parts[1]);
+      final year = int.tryParse(parts[2]);
+
+      if (day != null && month != null && year != null) {
+        if (month >= 1 && month <= 12 &&
+            day >= 1 && day <= 31) {
+          final parsedDate = DateTime(year, month, day);
+
+          if (parsedDate.day == day &&
+              parsedDate.month == month &&
+              parsedDate.year == year) {
+            return parsedDate;
+          }
+        }
+      }
+    }
+
+    // Handle dd/MM/yyyy format
+    final slashParts = value.split('/');
+
+    if (slashParts.length == 3) {
+      final day = int.tryParse(slashParts[0]);
+      final month = int.tryParse(slashParts[1]);
+      final year = int.tryParse(slashParts[2]);
+
+      if (day != null && month != null && year != null) {
+        final parsedDate = DateTime(year, month, day);
+
+        if (parsedDate.day == day &&
+            parsedDate.month == month &&
+            parsedDate.year == year) {
+          return parsedDate;
+        }
+      }
+    }
+
+    return DateTime.now();
   }
 
   String _formatDate(DateTime date) {
@@ -171,6 +223,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   }
 
   void _showMessage(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
