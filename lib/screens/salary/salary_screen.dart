@@ -158,10 +158,15 @@ class _SalaryScreenState extends State<SalaryScreen> {
       if (!mounted) return;
 
       _showMessage('Monthly salary generated successfully.');
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('========== SALARY GENERATION ERROR ==========');
+      debugPrint('Error: $e');
+      debugPrintStack(stackTrace: stackTrace);
+      debugPrint('=============================================');
+
       if (!mounted) return;
 
-      _showMessage('Unable to generate salary. Please try again.');
+      _showMessage('Salary Error: $e');
     } finally {
       if (mounted) {
         setState(() {

@@ -1,4 +1,3 @@
-
 class SalaryModel {
   final int? id;
   final int employeeId;
@@ -26,7 +25,6 @@ class SalaryModel {
   final double paidAmount;
   final String status;
 
-  // Salary generation stage
   final String salaryStage;
 
   final String generatedAt;
@@ -57,67 +55,85 @@ class SalaryModel {
     this.updatedAt,
   });
 
-  // Salary status constants
   static const String paid = 'Paid';
   static const String pending = 'Pending';
   static const String partial = 'Partial';
 
-  // Salary generation stage constants
   static const String provisional = 'Provisional';
   static const String finalStage = 'Final';
 
-  // Remaining salary amount
   double get remainingAmount {
     final remaining = finalPayable - paidAmount;
     return remaining > 0 ? remaining : 0;
   }
 
-  // Total deductions
   double get totalDeductions {
     return advanceDeduction + otherDeduction;
   }
 
-  // Payment status checks
   bool get isPaid => status == paid;
   bool get isPending => status == pending;
   bool get isPartial => status == partial;
 
-  // Salary stage checks
   bool get isProvisional => salaryStage == provisional;
   bool get isFinal => salaryStage == finalStage;
 
-  // Database Map se Salary Object
+  // Safely convert SQLite numeric values.
   factory SalaryModel.fromMap(Map<String, dynamic> map) {
     return SalaryModel(
-      id: map['id'] as int?,
-      employeeId: map['employee_id'] as int,
-      salaryMonth: map['salary_month'] as int,
-      salaryYear: map['salary_year'] as int,
+      id: map['id'] == null
+          ? null
+          : (map['id'] as num).toInt(),
+
+      employeeId: (map['employee_id'] as num).toInt(),
+
+      salaryMonth: (map['salary_month'] as num).toInt(),
+
+      salaryYear: (map['salary_year'] as num).toInt(),
+
       basicSalary: (map['basic_salary'] as num).toDouble(),
-      totalWorkingDays: map['total_working_days'] as int,
+
+      totalWorkingDays:
+          (map['total_working_days'] as num).toInt(),
+
       presentDays: (map['present_days'] as num).toDouble(),
+
       halfDays: (map['half_days'] as num).toDouble(),
-      absentDays: map['absent_days'] as int,
-      unpaidLeaveDays: map['unpaid_leave_days'] as int,
+
+      absentDays: (map['absent_days'] as num).toInt(),
+
+      unpaidLeaveDays:
+          (map['unpaid_leave_days'] as num).toInt(),
+
       payableDays: (map['payable_days'] as num).toDouble(),
+
       dailyRate: (map['daily_rate'] as num).toDouble(),
+
       grossSalary: (map['gross_salary'] as num).toDouble(),
+
       bonus: (map['bonus'] as num).toDouble(),
+
       advanceDeduction:
           (map['advance_deduction'] as num).toDouble(),
+
       otherDeduction:
           (map['other_deduction'] as num).toDouble(),
+
       finalPayable: (map['final_payable'] as num).toDouble(),
+
       paidAmount: (map['paid_amount'] as num).toDouble(),
+
       status: map['status'] as String,
+
       salaryStage:
           map['salary_stage'] as String? ?? finalStage,
+
       generatedAt: map['generated_at'] as String,
+
       updatedAt: map['updated_at'] as String?,
     );
   }
 
-  // Salary Object se Database Map
   Map<String, dynamic> toMap() {
     return {
       if (id != null) 'id': id,
@@ -145,7 +161,6 @@ class SalaryModel {
     };
   }
 
-  // Existing Salary Update
   SalaryModel copyWith({
     int? id,
     int? employeeId,
@@ -176,17 +191,21 @@ class SalaryModel {
       salaryMonth: salaryMonth ?? this.salaryMonth,
       salaryYear: salaryYear ?? this.salaryYear,
       basicSalary: basicSalary ?? this.basicSalary,
-      totalWorkingDays: totalWorkingDays ?? this.totalWorkingDays,
+      totalWorkingDays:
+          totalWorkingDays ?? this.totalWorkingDays,
       presentDays: presentDays ?? this.presentDays,
       halfDays: halfDays ?? this.halfDays,
       absentDays: absentDays ?? this.absentDays,
-      unpaidLeaveDays: unpaidLeaveDays ?? this.unpaidLeaveDays,
+      unpaidLeaveDays:
+          unpaidLeaveDays ?? this.unpaidLeaveDays,
       payableDays: payableDays ?? this.payableDays,
       dailyRate: dailyRate ?? this.dailyRate,
       grossSalary: grossSalary ?? this.grossSalary,
       bonus: bonus ?? this.bonus,
-      advanceDeduction: advanceDeduction ?? this.advanceDeduction,
-      otherDeduction: otherDeduction ?? this.otherDeduction,
+      advanceDeduction:
+          advanceDeduction ?? this.advanceDeduction,
+      otherDeduction:
+          otherDeduction ?? this.otherDeduction,
       finalPayable: finalPayable ?? this.finalPayable,
       paidAmount: paidAmount ?? this.paidAmount,
       status: status ?? this.status,

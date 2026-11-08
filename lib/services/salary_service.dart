@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 
 import '../database/database_helper.dart';
@@ -161,7 +160,6 @@ class SalaryService {
       int presentDays = 0;
       int halfDays = 0;
       int paidLeaveDays = 0;
-      int recordedAbsentDays = 0;
 
       for (final row in attendanceResult) {
         final attendanceDate =
@@ -186,18 +184,18 @@ class SalaryService {
             break;
 
           case AttendanceModel.absent:
-            recordedAbsentDays++;
             break;
         }
       }
 
       // Unmarked elapsed working days count as absent.
+      // Explicit absent and unmarked days are both unpaid.
       final absentDays = (
         elapsedWorkingDays -
         presentDays -
         halfDays -
         paidLeaveDays
-      ).clamp(0, elapsedWorkingDays);
+      ).clamp(0, elapsedWorkingDays).toInt();
 
       // Salary calculation.
       // Full eligible month working days are used as denominator.
@@ -325,7 +323,8 @@ class SalaryService {
       int salaryId;
 
       if (existingResult.isNotEmpty) {
-        salaryId = existingResult.first['id'] as int;
+        // SQLite numeric ID can be int or double.
+        salaryId = (existingResult.first['id'] as num).toInt();
 
         await txn.update(
           'salary_records',
