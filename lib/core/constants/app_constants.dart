@@ -14,7 +14,7 @@ class AppConstants {
 
   // Database
   static const String databaseName = 'business_manager.db';
-  static const int databaseVersion = 1;
+  static const int databaseVersion = 2;
 
   // Backup
   static const String backupFolderName = 'BusinessManagerBackup';
@@ -35,6 +35,10 @@ class AppConstants {
   static const String salaryPending = 'Pending';
   static const String salaryPartial = 'Partial';
 
+  // Salary Generation Stage
+  static const String salaryStageProvisional = 'Provisional';
+  static const String salaryStageFinal = 'Final';
+
   // Expense Payment Methods
   static const String paymentCash = 'Cash';
   static const String paymentUPI = 'UPI';
@@ -43,7 +47,6 @@ class AppConstants {
   // App Preferences
   static const String themeKey = 'app_theme';
   static const String pinSetupKey = 'pin_setup';
-  static const String biometricKey = 'biometric_enabled';
 
   // Validation
   static const int mobileNumberLength = 10;

@@ -1,6 +1,7 @@
 
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+
 import '../core/constants/app_constants.dart';
 
 class DatabaseHelper {
@@ -120,6 +121,7 @@ class DatabaseHelper {
         final_payable REAL NOT NULL DEFAULT 0,
         paid_amount REAL NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'Pending',
+        salary_stage TEXT NOT NULL DEFAULT 'Final',
         generated_at TEXT NOT NULL,
         updated_at TEXT,
         FOREIGN KEY (employee_id)
@@ -238,7 +240,24 @@ class DatabaseHelper {
     int oldVersion,
     int newVersion,
   ) async {
-    // Future database migrations will be added here.
+    // Version 1 to Version 2
+    if (oldVersion < 2 && newVersion >= 2) {
+      final columns = await db.rawQuery(
+        'PRAGMA table_info(salary_records)',
+      );
+
+      final hasSalaryStage = columns.any(
+        (column) => column['name'] == 'salary_stage',
+      );
+
+      if (!hasSalaryStage) {
+        await db.execute('''
+          ALTER TABLE salary_records
+          ADD COLUMN salary_stage TEXT
+          NOT NULL DEFAULT 'Final'
+        ''');
+      }
+    }
   }
 
   // Get Database Path

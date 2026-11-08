@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 
 import '../database/database_helper.dart';
@@ -13,7 +14,9 @@ class SalaryService {
 
   final DatabaseHelper _databaseHelper = DatabaseHelper.instance;
 
-  // Generate or recalculate monthly salary
+  // Generate or recalculate monthly salary.
+  // Current month = Provisional.
+  // Completed month = Final.
   Future<SalaryModel> generateMonthlySalary({
     required EmployeeModel employee,
     required int month,
@@ -31,13 +34,47 @@ class SalaryService {
       throw ArgumentError('Invalid salary year.');
     }
 
+    final now = DateTime.now();
+    final requestedMonth = DateTime(year, month);
+    final currentMonth = DateTime(now.year, now.month);
+
+    if (requestedMonth.isAfter(currentMonth)) {
+      throw ArgumentError(
+        'Future month salary cannot be generated.',
+      );
+    }
+
     final db = await _databaseHelper.database;
 
     return await db.transaction((txn) async {
-      final startDate = _formatDate(DateTime(year, month, 1));
-      final endDate = _formatDate(DateTime(year, month + 1, 1));
+      final monthStart = DateTime(year, month, 1);
+      final monthEnd = DateTime(year, month + 1, 0);
 
-      // Get configured non-working dates
+      // Current month cutoff is today.
+      // Completed months use their last day.
+      final calculationEnd = requestedMonth.isAtSameMomentAs(
+        currentMonth,
+      )
+          ? DateTime(now.year, now.month, now.day)
+          : monthEnd;
+
+      // Parse employee joining date.
+      final joiningDate = _parseEmployeeDate(
+        employee.joiningDate,
+      );
+
+      final effectiveStart = joiningDate.isAfter(monthStart)
+          ? joiningDate
+          : monthStart;
+
+      // Employee has not joined during this salary month.
+      if (effectiveStart.isAfter(monthEnd)) {
+        throw ArgumentError(
+          'Employee joining date is after the selected salary month.',
+        );
+      }
+
+      // Get configured non-working dates.
       final settingKey =
           'non_working_dates_${year}_${month.toString().padLeft(2, '0')}';
 
@@ -53,14 +90,19 @@ class SalaryService {
 
       if (settingResult.isNotEmpty) {
         try {
-          final decoded = jsonDecode(
-            settingResult.first['setting_value'] as String,
-          );
+          final settingValue =
+              settingResult.first['setting_value'];
 
-          if (decoded is List) {
-            nonWorkingDates.addAll(
-              decoded.whereType<String>(),
+          if (settingValue != null) {
+            final decoded = jsonDecode(
+              settingValue as String,
             );
+
+            if (decoded is List) {
+              nonWorkingDates.addAll(
+                decoded.whereType<String>(),
+              );
+            }
           }
         } catch (_) {
           throw FormatException(
@@ -69,42 +111,63 @@ class SalaryService {
         }
       }
 
-      // Calculate actual working days
-      final daysInMonth = DateTime(year, month + 1, 0).day;
-
+      // Count actual working days in the eligible month.
+      // No fixed weekly holiday is assumed.
       int totalWorkingDays = 0;
 
-      for (int day = 1; day <= daysInMonth; day++) {
-        final date = _formatDate(DateTime(year, month, day));
+      for (
+        DateTime date = effectiveStart;
+        !date.isAfter(monthEnd);
+        date = date.add(const Duration(days: 1))
+      ) {
+        final dateString = _formatDate(date);
 
-        if (!nonWorkingDates.contains(date)) {
+        if (!nonWorkingDates.contains(dateString)) {
           totalWorkingDays++;
         }
       }
 
-      // Get attendance records
+      // Count elapsed working days only.
+      // Future dates are never treated as absent.
+      int elapsedWorkingDays = 0;
+
+      for (
+        DateTime date = effectiveStart;
+        !date.isAfter(calculationEnd);
+        date = date.add(const Duration(days: 1))
+      ) {
+        final dateString = _formatDate(date);
+
+        if (!nonWorkingDates.contains(dateString)) {
+          elapsedWorkingDays++;
+        }
+      }
+
+      // Get attendance records within eligible calculation dates.
       final attendanceResult = await txn.query(
         'attendance',
         where: '''
           employee_id = ?
           AND attendance_date >= ?
-          AND attendance_date < ?
+          AND attendance_date <= ?
         ''',
         whereArgs: [
           employee.id,
-          startDate,
-          endDate,
+          _formatDate(effectiveStart),
+          _formatDate(calculationEnd),
         ],
       );
 
       int presentDays = 0;
       int halfDays = 0;
       int paidLeaveDays = 0;
+      int recordedAbsentDays = 0;
 
       for (final row in attendanceResult) {
-        final attendanceDate = row['attendance_date'] as String;
+        final attendanceDate =
+            row['attendance_date'] as String;
 
-        // Ignore attendance on configured non-working dates
+        // Ignore configured non-working dates.
         if (nonWorkingDates.contains(attendanceDate)) {
           continue;
         }
@@ -123,28 +186,32 @@ class SalaryService {
             break;
 
           case AttendanceModel.absent:
+            recordedAbsentDays++;
             break;
         }
       }
 
-      // Unmarked working days are also counted as absent
+      // Unmarked elapsed working days count as absent.
       final absentDays = (
-        totalWorkingDays -
+        elapsedWorkingDays -
         presentDays -
         halfDays -
         paidLeaveDays
-      ).clamp(0, totalWorkingDays);
+      ).clamp(0, elapsedWorkingDays);
 
-      // Salary calculation
+      // Salary calculation.
+      // Full eligible month working days are used as denominator.
       final dailyRate = totalWorkingDays > 0
           ? employee.basicSalary / totalWorkingDays
           : 0.0;
 
+      // Half day = 0.5 payable day.
+      // Paid leave is unpaid as per the finalized rule.
       final payableDays = presentDays + (halfDays * 0.5);
 
       final grossSalary = payableDays * dailyRate;
 
-      // Get salary adjustments
+      // Get salary adjustments.
       final adjustments = await txn.query(
         'salary_adjustments',
         where: '''
@@ -164,7 +231,8 @@ class SalaryService {
       double otherDeduction = 0;
 
       for (final adjustment in adjustments) {
-        final amount = (adjustment['amount'] as num).toDouble();
+        final amount =
+            (adjustment['amount'] as num).toDouble();
 
         switch (adjustment['adjustment_type']) {
           case SalaryAdjustmentModel.bonus:
@@ -182,12 +250,15 @@ class SalaryService {
       }
 
       final calculatedPayable =
-          grossSalary + bonus - advanceDeduction - otherDeduction;
+          grossSalary +
+          bonus -
+          advanceDeduction -
+          otherDeduction;
 
       final finalPayable =
           calculatedPayable > 0 ? calculatedPayable : 0.0;
 
-      // Check existing salary record
+      // Check existing salary record.
       final existingResult = await txn.query(
         'salary_records',
         where: '''
@@ -203,21 +274,27 @@ class SalaryService {
         limit: 1,
       );
 
+      // Preserve all previously recorded payments.
+      // Never reduce paid_amount during recalculation.
       final existingPaidAmount = existingResult.isNotEmpty
-          ? (existingResult.first['paid_amount'] as num).toDouble()
+          ? (existingResult.first['paid_amount'] as num)
+              .toDouble()
           : 0.0;
 
-      // Preserve previous payments
-      final paidAmount = existingPaidAmount > finalPayable
-          ? finalPayable
-          : existingPaidAmount;
+      final paidAmount = existingPaidAmount;
 
       final status = _getPaymentStatus(
         finalPayable,
         paidAmount,
       );
 
-      final now = DateTime.now().toIso8601String();
+      final salaryStage = requestedMonth.isAtSameMomentAs(
+        currentMonth,
+      )
+          ? SalaryModel.provisional
+          : SalaryModel.finalStage;
+
+      final timestamp = DateTime.now().toIso8601String();
 
       final salaryData = {
         'employee_id': employee.id,
@@ -238,8 +315,11 @@ class SalaryService {
         'final_payable': finalPayable,
         'paid_amount': paidAmount,
         'status': status,
-        'generated_at': now,
-        'updated_at': now,
+        'salary_stage': salaryStage,
+        'generated_at': existingResult.isNotEmpty
+            ? existingResult.first['generated_at']
+            : timestamp,
+        'updated_at': timestamp,
       };
 
       int salaryId;
@@ -260,6 +340,7 @@ class SalaryService {
         );
       }
 
+      // Return the saved salary record.
       final savedSalary = await txn.query(
         'salary_records',
         where: 'id = ?',
@@ -267,11 +348,17 @@ class SalaryService {
         limit: 1,
       );
 
+      if (savedSalary.isEmpty) {
+        throw StateError(
+          'Salary record could not be retrieved after saving.',
+        );
+      }
+
       return SalaryModel.fromMap(savedSalary.first);
     });
   }
 
-  // Get salary by employee and month
+  // Get salary by employee and month.
   Future<SalaryModel?> getSalaryByEmployeeMonth({
     required int employeeId,
     required int month,
@@ -301,7 +388,7 @@ class SalaryService {
     return SalaryModel.fromMap(result.first);
   }
 
-  // Get all salary records for a month
+  // Get all salary records for a month.
   Future<List<SalaryModel>> getMonthlySalaryRecords({
     required int month,
     required int year,
@@ -323,7 +410,7 @@ class SalaryService {
         .toList();
   }
 
-  // Get employee salary history
+  // Get employee salary history.
   Future<List<SalaryModel>> getEmployeeSalaryHistory(
     int employeeId,
   ) async {
@@ -341,22 +428,27 @@ class SalaryService {
         .toList();
   }
 
-  // Get total pending salary
+  // Get total pending salary.
   Future<double> getTotalPendingSalary() async {
     final db = await _databaseHelper.database;
 
     final result = await db.rawQuery('''
       SELECT COALESCE(
-        SUM(final_payable - paid_amount), 0
+        SUM(
+          CASE
+            WHEN final_payable > paid_amount
+            THEN final_payable - paid_amount
+            ELSE 0
+          END
+        ), 0
       ) AS total
       FROM salary_records
-      WHERE final_payable > paid_amount
     ''');
 
     return (result.first['total'] as num).toDouble();
   }
 
-  // Calculate payment status
+  // Calculate payment status.
   String _getPaymentStatus(
     double finalPayable,
     double paidAmount,
@@ -372,7 +464,37 @@ class SalaryService {
     return SalaryModel.partial;
   }
 
-  // Format date as yyyy-MM-dd
+  // Parse employee joining date.
+  // Supports dd-MM-yyyy and yyyy-MM-dd.
+  DateTime _parseEmployeeDate(String value) {
+    final parsed = DateTime.tryParse(value);
+
+    if (parsed != null) {
+      return DateTime(
+        parsed.year,
+        parsed.month,
+        parsed.day,
+      );
+    }
+
+    final parts = value.split('-');
+
+    if (parts.length == 3) {
+      final day = int.tryParse(parts[0]);
+      final month = int.tryParse(parts[1]);
+      final year = int.tryParse(parts[2]);
+
+      if (day != null && month != null && year != null) {
+        return DateTime(year, month, day);
+      }
+    }
+
+    throw FormatException(
+      'Invalid employee joining date: $value',
+    );
+  }
+
+  // Format date as yyyy-MM-dd.
   String _formatDate(DateTime date) {
     final year = date.year.toString().padLeft(4, '0');
     final month = date.month.toString().padLeft(2, '0');

@@ -1,3 +1,4 @@
+
 class SalaryModel {
   final int? id;
   final int employeeId;
@@ -25,6 +26,9 @@ class SalaryModel {
   final double paidAmount;
   final String status;
 
+  // Salary generation stage
+  final String salaryStage;
+
   final String generatedAt;
   final String? updatedAt;
 
@@ -48,6 +52,7 @@ class SalaryModel {
     required this.finalPayable,
     required this.paidAmount,
     required this.status,
+    this.salaryStage = finalStage,
     required this.generatedAt,
     this.updatedAt,
   });
@@ -56,6 +61,10 @@ class SalaryModel {
   static const String paid = 'Paid';
   static const String pending = 'Pending';
   static const String partial = 'Partial';
+
+  // Salary generation stage constants
+  static const String provisional = 'Provisional';
+  static const String finalStage = 'Final';
 
   // Remaining salary amount
   double get remainingAmount {
@@ -70,10 +79,12 @@ class SalaryModel {
 
   // Payment status checks
   bool get isPaid => status == paid;
-
   bool get isPending => status == pending;
-
   bool get isPartial => status == partial;
+
+  // Salary stage checks
+  bool get isProvisional => salaryStage == provisional;
+  bool get isFinal => salaryStage == finalStage;
 
   // Database Map se Salary Object
   factory SalaryModel.fromMap(Map<String, dynamic> map) {
@@ -99,6 +110,8 @@ class SalaryModel {
       finalPayable: (map['final_payable'] as num).toDouble(),
       paidAmount: (map['paid_amount'] as num).toDouble(),
       status: map['status'] as String,
+      salaryStage:
+          map['salary_stage'] as String? ?? finalStage,
       generatedAt: map['generated_at'] as String,
       updatedAt: map['updated_at'] as String?,
     );
@@ -126,6 +139,7 @@ class SalaryModel {
       'final_payable': finalPayable,
       'paid_amount': paidAmount,
       'status': status,
+      'salary_stage': salaryStage,
       'generated_at': generatedAt,
       'updated_at': updatedAt,
     };
@@ -152,6 +166,7 @@ class SalaryModel {
     double? finalPayable,
     double? paidAmount,
     String? status,
+    String? salaryStage,
     String? generatedAt,
     String? updatedAt,
   }) {
@@ -175,6 +190,7 @@ class SalaryModel {
       finalPayable: finalPayable ?? this.finalPayable,
       paidAmount: paidAmount ?? this.paidAmount,
       status: status ?? this.status,
+      salaryStage: salaryStage ?? this.salaryStage,
       generatedAt: generatedAt ?? this.generatedAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
